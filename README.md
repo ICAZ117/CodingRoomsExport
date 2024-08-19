@@ -1,4 +1,4 @@
-This is a simple export tool for coding rooms problems. Simply paste your coding rooms bearer token into index.html, open the file in your browser, and enter the relevant info:
+This is a simple export tool for coding rooms problems. Simply run index.html and enter the relevant info:
 
 * Token: Your Coding Rooms auth bearer token - can be obtained from the headers of any request made by Coding Rooms to their API
 * Course number: The reference number for the course in CodingRooms' DB - open the network tab of your browser inspector on their page and look at the API request that returns the nativeAssignments JSON object. The request URL contains the numerical course number
