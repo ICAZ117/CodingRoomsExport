@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+
+    <head>
+        <title>My Page</title>
+        <script>
+            async function run() {
+                const token = document.getElementById("token").value;
+                const course = document.getElementById("courseNumber").value;
+                var i = document.getElementById("i").value;
+                var lang = document.getElementById("lang").value;
+
+                // Get directory handle
+                const handle = await window.showDirectoryPicker();
+
+                // Get list of problems in course
+                const problemList = await getProblemList(token, course);
+                await save(course, "problemList.json", JSON.stringify(problemList), handle);
+
+                // Loop through each course in problemList
+                for (; i < problemList.data.length; i++) {
+                    // Get data for first problem
+                    const problemData = await getProblemData(token, problemList.data[i].questionId);
+
+                    console.log(`${i}: ${problemData.data.title}`);
+
+                    await parseProblem(problemData, course, handle, lang);
+                }
+            }
+
+            async function parseProblem(problemData, course, handle, lang) {
+                // Legalize file name
+                problemData.data.title = legalize(problemData.data.title);
+
+                // Save problem data to master JSON file
+                await save(`${course}/${problemData.data.title}`, `${problemData.data.title}.json`, JSON.stringify(problemData), handle);
+
+                // Save problem statement to md file
+                await save(`${course}/${problemData.data.title}`, `prompt.md`, problemData.data.promptMD, handle);
+
+                // TEMPLATE
+                // Get template object
+                const template = problemData.data.singleFileCodeData.common.template;
+
+                if (template) {
+                    // Save main template file
+                    await save(`${course}/${problemData.data.title}/template`, (template.defaultFilePath) ? template.defaultFilePath : `${extractClass(template.defaultFileContents)}.${lang}`, template.defaultFileContents, handle);
+
+                    // Check for additional files
+                    if (template.extraFiles) {
+                        // Since extrafiles is an object of objects instead of an array, we need to loop through the keys
+                        for (const key in template.extraFiles) {
+                            if (template.extraFiles[key].contents) {
+                                // For each extra file, there is no file name provided. 
+                                // Therefore, we must extract the class name from the file content
+                                var className;
+
+                                try {
+                                    className = extractClass(template.extraFiles[key].contents);
+                                    await save(`${course}/${problemData.data.title}/template`, `${className}.${lang}`, template.extraFiles[key].contents, handle);
+                                } catch (error) {
+                                    await save(`${course}/${problemData.data.title}/template`, `${key}.txt`, template.extraFiles[key].contents, handle);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // MODEL SOLUTION
+                // Get modelSolution object
+                const modelSolution = problemData.data.singleFileCodeData.grading.modelSolution;
+
+                if (modelSolution) {
+                    // Save model solution to file
+                    await save(`${course}/${problemData.data.title}/modelSolution`, (modelSolution.defaultFilePath) ? modelSolution.defaultFilePath : `${extractClass(modelSolution.defaultFileContents)}.${lang}`, modelSolution.defaultFileContents, handle);
+
+                    // Check for additional files
+                    if (modelSolution.extraFiles) {
+                        // Since extrafiles is an object of objects instead of an array, we need to loop through the keys
+                        for (const key in modelSolution.extraFiles) {
+                            if (modelSolution.extraFiles[key].contents) {
+                                // For each extra file, there is no file name provided. 
+                                // Therefore, we must extract the class name from the file content
+                                var className;
+
+                                try {
+                                    className = extractClass(modelSolution.extraFiles[key].contents);
+                                    await save(`${course}/${problemData.data.title}/modelSolution`, `${className}.${lang}`, modelSolution.extraFiles[key].contents, handle);
+                                } catch (error) {
+                                    await save(`${course}/${problemData.data.title}/modelSolution`, `${key}.txt`, modelSolution.extraFiles[key].contents, handle);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // TEST CASES
+                // Get test cases
+                const testCases = problemData.data.singleFileCodeData.grading.testCases;
+
+                if (testCases) {
+                    // Loop through each test case
+                    for (let i = 0; i < testCases.length; i++) {
+                        // Test case object
+                        const tc = testCases[i];
+
+                        // Folder title
+                        const tcTitle = `tc${i + 1} - ${legalize(tc.title)}`;
+
+                        // Save test case data to JSON file
+                        await save(`${course}/${problemData.data.title}/testCases/${tcTitle}`, `${tcTitle}.json`, JSON.stringify(tc), handle);
+
+                        // If there's feedback, save it
+                        if (tc.feedbackOnFailure) {
+                            await save(`${course}/${problemData.data.title}/testCases/${tcTitle}`, `feedback.txt`, tc.feedbackOnFailure, handle);
+                        }
+
+                        // Switch on tc type
+                        switch (tc.type) {
+                            case "unit_test":
+                                // Save unit test file
+                                await save(`${course}/${problemData.data.title}/testCases/${tcTitle}`, tc.unitTestFilePath, tc.unitTestCode, handle);
+                                break;
+                            case "stdout":
+                                // Save input and output files
+                                await save(`${course}/${problemData.data.title}/testCases/${tcTitle}`, `input.in`, tc.stdin, handle);
+                                await save(`${course}/${problemData.data.title}/testCases/${tcTitle}`, `output.out`, tc.stdout, handle);
+                                break;
+                            default:
+                                var errorLog = {
+                                    course: course,
+                                    problemID: problemData.data.questionId,
+                                    problemTitle: problemData.data.title,
+                                    testCaseTitle: tc.title,
+                                    testCase: tc,
+                                    error: "Unknown test case type",
+                                }
+                                console.error(errorLog);
+                                break;
+                        }
+                    }
+                }
+            }
+
+            async function getProblemList(token, courseID) {
+                const myHeaders = new Headers();
+                myHeaders.append("Authorization", `Bearer ${token}`);
+                myHeaders.append("Cookie", "__cf_bm=M1w.t2cKIzjbqFl.VtnVfisU.jOeP8hIegNfgx7gVe8-1724072136-1.0.1.1-vyTBYYEBS0LybkWBkwKZ.OWevrcEWeHnQUQHWI1ekuILaf1oF7O0WYTazT2P8rxmLpypdJRmn9KW7UQCF8IsEQ; _cfuvid=KLcZ5uidWSoUvyJ_JS8srYay9fOHOApx4Sr1m539qbA-1724072136323-0.0.1.1-604800000");
+
+                const requestOptions = {
+                    method: "GET",
+                    headers: myHeaders,
+                    redirect: "follow"
+                };
+
+                var problemList;
+
+                await fetch(`https://cc-api.codingrooms.com/v1/classes/${courseID}/native-assignments`, requestOptions)
+                    .then((response) => response.json())
+                    .then((result) => problemList = result)
+                    .catch((error) => console.error(error));
+
+                return problemList;
+            }
+
+            async function getProblemData(token, problemID) {
+                const myHeaders = new Headers();
+                myHeaders.append("Authorization", `Bearer ${token}`);
+                myHeaders.append("Cookie", "__cf_bm=yqcNK1mVWkn7oGFR5brqIuatUnMPqUWpNJ8ePrjCnCA-1724073763-1.0.1.1-ClRE9sj2A6w25p4Aq9b86GlMZZG_kvhbFZ56M0Jmlf.ySNqcnAJnXg4DfLVfd0b.Y.f.Z_7HgZAXs0JuyeiIQA; _cfuvid=KLcZ5uidWSoUvyJ_JS8srYay9fOHOApx4Sr1m539qbA-1724072136323-0.0.1.1-604800000");
+
+                const requestOptions = {
+                    method: "GET",
+                    headers: myHeaders,
+                    redirect: "follow"
+                };
+
+                var problemData;
+
+                await fetch(`https://cc-api.codingrooms.com/v1/questions/${problemID}`, requestOptions)
+                    .then((response) => response.json())
+                    .then((result) => problemData = result)
+                    .catch((error) => console.error(error));
+
+                return problemData;
+            }
+
+            async function save(directory, fileName, textContent, handle) {
+                // Split directory on / and create nested directories
+                directory = directory.split("/");
+                for (let i = 0; i < directory.length; i++) {
+                    handle = await handle.getDirectoryHandle(directory[i], { create: true });
+                }
+
+                // Create file and write text content
+                const fileHandle = await handle.getFileHandle(fileName, { create: true });
+                const writable = await fileHandle.createWritable();
+                await writable.write(textContent);
+                await writable.close();
+            }
+
+            function legalize(text) {
+                return text.replace(/[/\\?%*:|"<>]/g, '-');
+            }
+
+            function extractClass(text, name) {
+                try {
+                    return text.match(/class\s+(\w+)/)[1];
+                } catch (error) {
+                    return name || 'main';
+                }
+            }
+        </script>
+    </head>
+
+    <body>
+        <label for="token">Token</label>
+        <input type="text" id="token">
+        <br>
+        <label for="courseNumber">Course Number</label>
+        <input type="text" id="courseNumber">
+        <br>
+        <label for="i">Start from problem index</label>
+        <input type="text" id="i">
+        <br>
+        <label for="lang">Language</label>
+        <input type="text" id="lang">
+        <br>
+        <button onclick="run()">Run</button>
+    </body>
+
+    <style>
+        body {
+            font-family: sans-serif;
+        }
+    </style>
+
+</html>
